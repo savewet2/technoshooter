@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Book Search</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f7fb;
+      margin: 0;
+      padding: 24px;
+      color: #1f2937;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .card {
+      background: white;
+      border-radius: 16px;
+      padding: 20px;
+      margin-bottom: 18px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.08);
+    }
+    h1, h2 {
+      margin-top: 0;
+    }
+    input[type="text"], input[type="file"], button {
+      width: 100%;
+      box-sizing: border-box;
+      padding: 12px;
+      border-radius: 10px;
+      border: 1px solid #d1d5db;
+      margin-top: 8px;
+      margin-bottom: 12px;
+      font-size: 15px;
+    }
+    button {
+      background: #111827;
+      color: white;
+      border: none;
+      cursor: pointer;
+    }
+    button:hover {
+      opacity: 0.96;
+    }
+    button:disabled {
+      background: #9ca3af;
+      cursor: not-allowed;
+    }
+    .result {
+      background: #f3f4f6;
+      border-radius: 12px;
+      padding: 14px;
+      margin-top: 10px;
+      white-space: pre-wrap;
+    }
+    .muted {
+      color: #6b7280;
+    }
+    .status {
+      padding: 12px 14px;
+      border-radius: 12px;
+      font-weight: bold;
+      margin-top: 10px;
+    }
+    .status-wait {
+      background: #fff7ed;
+      color: #9a3412;
+    }
+    .status-ready {
+      background: #ecfdf5;
+      color: #065f46;
+    }
+    .progress-wrapper {
+      margin-top: 12px;
+      margin-bottom: 12px;
+      display: none;
+    }
+    .progress-label {
+      margin-bottom: 8px;
+      font-size: 14px;
+      color: #374151;
+    }
+    .progress-bar {
+      width: 100%;
+      height: 18px;
+      background: #e5e7eb;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      background: #111827;
+      transition: width 0.35s ease;
+    }
+    .hint {
+      font-size: 14px;
+      color: #6b7280;
+      margin-top: 4px;
+    }
+    ul {
+      padding-left: 18px;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <h1>📚 Smart Book Search</h1>
+    <div class="muted">Загрузка книг, поиск фрагментов и ответы на вопросы по тексту.</div>
+
+    <div id="systemStatus" class="status {% if ready %}status-ready{% else %}status-wait{% endif %}">
+      {% if ready %}
+        Система готова к поиску и вопросам
+      {% else %}
+        Система ещё не готова. Сначала загрузите книгу и дождитесь завершения обработки.
+      {% endif %}
+    </div>
+
+    <div class="hint" id="modelHint">
+      {% if ready %}
+        Модель поиска загружена, индекс построен.
+      {% else %}
+        Модель ещё не готова к работе с вопросами.
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Загрузка книги</h2>
+    <form id="uploadForm">
+      <input type="file" id="bookFile" accept=".txt" required>
+      <button type="submit" id="uploadButton">Загрузить</button>
+    </form>
+
+    <div class="progress-wrapper" id="progressWrapper">
+      <div class="progress-label" id="progressLabel">Подготовка...</div>
+      <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+      </div>
+    </div>
+
+    <div id="uploadResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>Поиск фрагментов</h2>
+    <input type="text" id="searchQuery" placeholder="Например: Найди, где говорится про дуэль">
+    <button onclick="runSearch()" id="searchButton" {% if not ready %}disabled{% endif %}>Искать</button>
+    <div class="hint" id="searchHint">
+      {% if ready %}
+        Можно искать по загруженным книгам.
+      {% else %}
+        Пока книга не обработана, поиск недоступен.
+      {% endif %}
+    </div>
+    <div id="searchResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>Ответ на вопрос</h2>
+    <input type="text" id="askQuery" placeholder="Например: Что произошло с Наташей и Пьером в эпилоге?">
+    <button onclick="runAsk()" id="askButton" {% if not ready %}disabled{% endif %}>Ответить</button>
+    <div class="hint" id="askHint">
+      {% if ready %}
+        Можно задавать вопросы по содержанию книг.
+      {% else %}
+        Пока идёт обработка книги, вопрос задавать не нужно.
+      {% endif %}
+    </div>
+    <div id="askResult"></div>
+  </div>
+
+  <div class="card">
+    <h2>Загруженные книги</h2>
+    {% if books %}
+      <ul>
+        {% for book in books %}
+          <li>{{ book }}</li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <div class="muted">Пока книг нет.</div>
+    {% endif %}
+  </div>
+</div>
+
+<script>
+  const uploadForm = document.getElementById("uploadForm");
+  const uploadButton = document.getElementById("uploadButton");
+  const searchButton = document.getElementById("searchButton");
+  const askButton = document.getElementById("askButton");
+
+  const progressWrapper = document.getElementById("progressWrapper");
+  const progressFill = document.getElementById("progressFill");
+  const progressLabel = document.getElementById("progressLabel");
+
+  const uploadResult = document.getElementById("uploadResult");
+  const systemStatus = document.getElementById("systemStatus");
+  const modelHint = document.getElementById("modelHint");
+  const searchHint = document.getElementById("searchHint");
+  const askHint = document.getElementById("askHint");
+
+  function setReadyState(isReady) {
+    if (isReady) {
+      systemStatus.className = "status status-ready";
+      systemStatus.textContent = "Система готова к поиску и вопросам";
+      modelHint.textContent = "Модель поиска загружена, индекс построен.";
+      searchHint.textContent = "Можно искать по загруженным книгам.";
+      askHint.textContent = "Можно задавать вопросы по содержанию книг.";
+      searchButton.disabled = false;
+      askButton.disabled = false;
+    } else {
+      systemStatus.className = "status status-wait";
+      systemStatus.textContent = "Система ещё не готова. Сначала загрузите книгу и дождитесь завершения обработки.";
+      modelHint.textContent = "Модель ещё не готова к работе с вопросами.";
+      searchHint.textContent = "Пока книга не обработана, поиск недоступен.";
+      askHint.textContent = "Пока идёт обработка книги, вопрос задавать не нужно.";
+      searchButton.disabled = true;
+      askButton.disabled = true;
+    }
+  }
+
+  function showProgress() {
+    progressWrapper.style.display = "block";
+    progressFill.style.width = "0%";
+    progressLabel.textContent = "Загрузка файла...";
+  }
+
+  function setProgress(percent, text) {
+    progressFill.style.width = percent + "%";
+    progressLabel.textContent = text;
+  }
+
+  function hideProgress() {
+    setTimeout(() => {
+      progressWrapper.style.display = "none";
+    }, 900);
+  }
+
+  async function refreshStatus() {
+    try {
+      const response = await fetch("/status");
+      const data = await response.json();
+      setReadyState(data.ready);
+    } catch (e) {
+      setReadyState(false);
+    }
+  }
+
+  uploadForm.addEventListener("submit", async function (e) {
+    e.preventDefault();
+
+    const fileInput = document.getElementById("bookFile");
+    if (!fileInput.files.length) return;
+
+    const formData = new FormData();
+    formData.append("file", fileInput.files[0]);
+
+    uploadButton.disabled = true;
+    searchButton.disabled = true;
+    askButton.disabled = true;
+    uploadResult.innerHTML = "";
+
+    showProgress();
+    setReadyState(false);
+
+    try {
+      setProgress(15, "Файл выбран. Начинаем загрузку...");
+      await new Promise(r => setTimeout(r, 250));
+
+      setProgress(35, "Файл отправляется на сервер...");
+      await new Promise(r => setTimeout(r, 250));
+
+      const response = await fetch("/upload", {
+        method: "POST",
+        body: formData
+      });
+
+      setProgress(70, "Книга загружена. Строим индекс...");
+      await new Promise(r => setTimeout(r, 400));
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setProgress(100, "Ошибка обработки.");
+        uploadResult.innerHTML = `<div class="result">${data.detail || "Ошибка загрузки"}</div>`;
+        setReadyState(false);
+        hideProgress();
+        uploadButton.disabled = false;
+        return;
+      }
+
+      setProgress(100, "Готово. Модель может искать и отвечать.");
+      uploadResult.innerHTML = `<div class="result">${JSON.stringify(data, null, 2)}</div>`;
+
+      await refreshStatus();
+      hideProgress();
+
+      setTimeout(() => {
+        window.location.reload();
+      }, 800);
+
+    } catch (error) {
+      setProgress(100, "Ошибка соединения.");
+      uploadResult.innerHTML = `<div class="result">Не удалось загрузить книгу.</div>`;
+      setReadyState(false);
+      hideProgress();
+    } finally {
+      uploadButton.disabled = false;
+    }
+  });
+
+  async function runSearch() {
+    const query = document.getElementById("searchQuery").value.trim();
+    const container = document.getElementById("searchResult");
+    container.innerHTML = "";
+
+    if (!query) return;
+    if (searchButton.disabled) {
+      container.innerHTML = `<div class="result">Сначала дождитесь завершения обработки книги.</div>`;
+      return;
+    }
+
+    const response = await fetch(`/search?query=${encodeURIComponent(query)}`);
+    const data = await response.json();
+
+    if (data.message) {
+      container.innerHTML = `<div class="result">${data.message}</div>`;
+      return;
+    }
+
+    for (const item of data.results) {
+      container.innerHTML += `
+        <div class="result">
+Книга: ${item.source}
+Фрагмент: #${item.chunk_id}
+Позиция: ~${item.relative_position_percent}% книги
+Символы: ${item.char_start}-${item.char_end}
+Score: ${item.score.toFixed(4)}
+
+${item.text}
+        </div>
+      `;
+    }
+  }
+
+  async function runAsk() {
+    const query = document.getElementById("askQuery").value.trim();
+    const container = document.getElementById("askResult");
+    container.innerHTML = "";
+
+    if (!query) return;
+    if (askButton.disabled) {
+      container.innerHTML = `<div class="result">Пока идёт обработка книги, вопрос задавать не нужно.</div>`;
+      return;
+    }
+
+    container.innerHTML = `<div class="result">Идёт поиск фрагментов и подготовка ответа...</div>`;
+
+    const response = await fetch(`/ask?query=${encodeURIComponent(query)}`);
+    const data = await response.json();
+
+    let html = `<div class="result"><strong>Ответ:</strong>\n\n${data.answer}</div>`;
+
+    if (data.citations && data.citations.length) {
+      html += `<div class="result"><strong>Цитаты:</strong>\n\n`;
+      for (const c of data.citations) {
+        html += `[${c.source} #${c.chunk_id}, символы ${c.char_start}-${c.char_end}]\n${c.text}\n\n`;
+      }
+      html += `</div>`;
+    }
+
+    if (data.message) {
+      html += `<div class="result">${data.message}</div>`;
+    }
+
+    container.innerHTML = html;
+  }
+
+  refreshStatus();
+</script>
+</body>
+</html>
