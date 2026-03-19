@@ -17,11 +17,15 @@
 - FastAPI
 - Sentence Transformers
 - FAISS
-- OpenAI API
+- DEEPSEEK API
 - HTML + JS
 
 ## Установка
 
 pip install -r requirements.txt
+
+## запуск
+
+python -m uvicorn app.main:app --reload
 
 http://127.0.0.1:8000/
